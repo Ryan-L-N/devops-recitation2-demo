@@ -1,0 +1,60 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  name: 'Azure Pipelines'
+
+stages:
+- stage: Build
+  displayName: "Build Stage"
+  jobs:
+    - job: BuildHTML
+      displayName: "Minify HTML"
+      steps:
+        - task: NodeTool@0
+          inputs:
+            versionSpec: '18.x'
+          displayName: 'Use Node.js'
+
+        - script: |
+            mkdir dist
+            npx html-minifier-terser index.html -o dist/index.html --collapse-whitespace --remove-comments --minify-js true --minify-css true
+            echo "Minification complete. Generated dist/index.html"
+          displayName: "Minify HTML using html-minifier-terser"
+
+        - publish: dist
+          artifact: drop
+          displayName: "Publish minified HTML as artifact"
+
+- stage: Deploy
+  displayName: "Deploy to GitHub Pages"
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+    - job: DeployToGitHub
+      displayName: "Push index.html to gh-pages branch"
+      steps:
+        - checkout: self
+          persistCredentials: true
+
+        - download: current
+          artifact: drop
+
+        - script: |
+            echo "Cloning gh-pages branch..."
+            git fetch origin gh-pages || echo "No gh-pages branch yet"
+            git checkout gh-pages || git checkout --orphan gh-pages
+
+            echo "Copying built HTML..."
+            cp $(Pipeline.Workspace)/drop/index.html index.html
+
+            git config user.name "azure-pipelines-bot"
+            git config user.email "azure-pipelines@users.noreply.github.com"
+
+            git add index.html
+            git commit -m "Deploy: $(Build.BuildNumber)" || echo "No changes to commit"
+            git push origin gh-pages
+            echo "Deployment Successful!"
+          displayName: "Commit and Push to gh-pages"
